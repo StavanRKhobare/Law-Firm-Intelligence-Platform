@@ -1,16 +1,42 @@
 # Law Firm Case Management
 
-A desktop app for running one litigation firm: matters, lawyers, clients, opposing parties, evidence and analytics. The design, schema and paper notes are in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
+A platform for running one litigation firm: matters, hearings and case history, deadlines, documents, lawyers, clients, conflict checks and firm analytics. The design and schema notes are in [PROJECT_GUIDE.md](PROJECT_GUIDE.md).
 
-Do not import `database/crime_intelligence_db_backup.sql`. It is the old police schema, kept only for reference.
+## What it does
+
+| Area | What you get |
+|---|---|
+| Matters | Open and edit matters, assign counsel, track status through to disposal and outcome |
+| Case history | One timeline of hearings, remarks, status changes, documents and counsel changes |
+| Hearings | Calendar and printable cause list, recording results, listing the next date in one step |
+| Tasks and deadlines | Limitation, filing, reply and compliance dates, plus day-to-day tasks |
+| Documents | Upload and download files per matter, up to 50 MB, stored in MongoDB |
+| Team | Request-to-join with admin approval, or admin-created accounts with temporary passwords |
+| Conflict check | Warns when a client is an opposing party elsewhere, or the reverse |
+| Search | Across matters, people and documents, limited to what you may see |
+| Analytics | Workload, matters with no next date, adjournment rates, time to disposal, outcomes |
+| Audit log | Who did what, including file downloads. Entries cannot be changed |
+
+### Who can do what
+
+The API enforces these rules, not just the screens.
+
+| | Admin | Lawyer | Staff |
+|---|---|---|---|
+| Open matters | All | Their own. Titles and numbers only for the rest | All |
+| Hearings, tasks, remarks, documents | All | On their own matters | All |
+| Edit a matter, change its status | Yes | Their own | No |
+| Assign counsel | Yes | Where they are lead | No |
+| Delete matters | Yes | No | No |
+| Analytics, team, audit log | Yes | No | No |
 
 ## Tech stack
 
 | Part | Tools |
 |---|---|
 | Backend | FastAPI, SQLAlchemy, Pydantic, JWT |
-| Database | PostgreSQL. MongoDB is optional and only stores evidence files |
-| Frontend | Electron, React, Material UI, Recharts, Axios |
+| Databases | PostgreSQL for records (Alembic migrations), MongoDB GridFS for files |
+| Frontend | React, Material UI, Recharts, Axios. Runs in a browser or Electron |
 | ML | scikit-learn, statsmodels |
 
 ## Running on Linux
@@ -29,7 +55,7 @@ If setup is already done, open two terminals:
 
 ```bash
 # Terminal 1: backend
-docker start law-firm-postgres    # skip if you installed PostgreSQL with apt
+docker start law-firm-postgres law-firm-mongo
 cd backend
 source venv/bin/activate
 uvicorn app.main:app --reload
@@ -38,14 +64,16 @@ uvicorn app.main:app --reload
 ```bash
 # Terminal 2: frontend
 cd frontend
-npm run electron:start
+npm run dev
 ```
+
+Then open http://localhost:5173. For the desktop window, run `npm run electron:start` instead of `npm run dev`.
 
 ## First-time setup
 
 ### 1. Install the prerequisites (ONE-TIME)
 
-You need Python 3.11+ (tested on 3.14), Node.js 18+ (tested on 22), and either Docker or PostgreSQL.
+You need Python 3.11+ (tested on 3.14), Node.js 18+ (tested on 22), and Docker.
 
 ```bash
 python3 --version
@@ -53,62 +81,28 @@ node -v
 docker --version
 ```
 
-### 2. Create the database and load the schema (ONE-TIME)
+### 2. Start the databases (ONE-TIME)
 
-Choose **one** option. Both create `law_firm_db` and load its tables, triggers, views, functions and sample data.
-
-> **Warning:** `law_firm_schema.sql` starts by dropping every table. Running it again **deletes all data** and restores the sample firm. Only re-run it if you want that reset.
-
-Replace `YOUR_PASSWORD` with a password of your choice. You will use the same one in step 3.
-
-**Option A: Docker**
-
-Skip the `docker run` if `docker ps -a` already lists `law-firm-postgres`.
+Replace `YOUR_PASSWORD` with a strong password. You will use it again in step 3. Skip a `docker run` if `docker ps -a` already lists that container.
 
 ```bash
-# ONE-TIME: create the container and the empty database
-docker run -d --name law-firm-postgres --restart unless-stopped \
+docker run -d --name law-firm-postgres --restart unless-stopped --network host \
   -e POSTGRES_PASSWORD=YOUR_PASSWORD \
   -e POSTGRES_DB=law_firm_db \
-  -p 5432:5432 \
   -v law_firm_pgdata:/var/lib/postgresql/data \
-  postgres:16
+  postgres:16 -c listen_addresses=localhost
 
-# Wait until this prints "accepting connections"
-docker exec law-firm-postgres pg_isready -U postgres
-
-# ONE-TIME: create the tables and load the sample data
-docker exec -i law-firm-postgres psql -U postgres -d law_firm_db -v ON_ERROR_STOP=1 < database/law_firm_schema.sql
+docker run -d --name law-firm-mongo --restart unless-stopped --network host \
+  -v law_firm_mongodata:/data/db \
+  mongo:7 --bind_ip 127.0.0.1
 ```
 
-**Option B: PostgreSQL installed with apt**
+Both listen on this machine only. Check that they are ready:
 
 ```bash
-# ONE-TIME: install and start PostgreSQL
-sudo apt install postgresql
-sudo systemctl enable --now postgresql
-
-# ONE-TIME: set the password and create the empty database
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'YOUR_PASSWORD';"
-sudo -u postgres createdb law_firm_db
-
-# ONE-TIME: create the tables and load the sample data
-psql -h localhost -U postgres -d law_firm_db -v ON_ERROR_STOP=1 -f database/law_firm_schema.sql
+docker exec law-firm-postgres pg_isready -U postgres      # "accepting connections"
+docker exec law-firm-mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok'      # 1
 ```
-
-Use `-h localhost` here. Without it, `psql -U postgres` usually fails with `Peer authentication failed`.
-
-Check that it worked. You should see `12`:
-
-```bash
-# Docker
-docker exec law-firm-postgres psql -U postgres -d law_firm_db -tc "SELECT count(*) FROM legal_case;"
-
-# apt
-psql -h localhost -U postgres -d law_firm_db -tc "SELECT count(*) FROM legal_case;"
-```
-
-> Load the schema before relying on database features. If the API starts on an empty database, it creates plain tables and sample data by itself, but **without** the triggers, views and functions.
 
 ### 3. Set up the backend (ONE-TIME)
 
@@ -120,15 +114,10 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r ../requirements.txt
 cp .env.example .env
-```
-
-Generate a secret key:
-
-```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Then edit `backend/.env` and set these two lines:
+Edit `backend/.env` and set these two lines, using the key the last command printed:
 
 ```env
 DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/law_firm_db
@@ -137,43 +126,62 @@ SECRET_KEY=the-key-you-just-generated
 
 If the password contains symbols such as `@`, `:` or `$`, URL-encode them in `DATABASE_URL` (`$` becomes `%24`).
 
-### 4. Train the ML models (ONE-TIME)
+### 4. Create the database tables (ONE-TIME)
 
-Trained `.pkl` files are not stored in git, so each machine trains its own. The matter type assistant returns a 503 error until this is done.
+```bash
+cd backend
+source venv/bin/activate
+alembic upgrade head                  # PostgreSQL: tables, triggers, views
+python -m mongo_migrations upgrade    # MongoDB: file storage and indexes
+```
 
-Install only the ML packages the app uses. The full `requirements-ml.txt` also pulls in very large packages such as `torch` that the current models don't need.
+**If you loaded the old `law_firm_schema.sql` before migrations existed**, run `alembic stamp 0001` once before `alembic upgrade head`. Your data is kept.
+
+### 5. Train the matter type suggestion (ONE-TIME)
+
+Trained `.pkl` files are not stored in git, so each machine trains its own. Until then, "Suggest matter type" reports that it isn't trained. Everything else works.
 
 ```bash
 cd backend
 source venv/bin/activate
 pip install pandas numpy scikit-learn joblib statsmodels
-
-# train_models.py does not read .env by itself, so export the database URL first
-export "$(grep '^DATABASE_URL=' .env)"
-python train_models.py --model all
+python train_models.py --model classifier
 ```
 
-Training takes under a minute. Run it from `backend/`. Each run also writes a `training_results_<timestamp>.json` file there, which you can delete.
+This takes under a minute and needs no database. The full `requirements-ml.txt` is not needed: it also installs very large packages such as `torch`.
 
-**OCCASIONAL:** retrain when the data changes. Use `--model classifier`, `--model hotspot` or `--model forecaster` to train just one. `--model classifier` needs no database.
-
-### 5. Set up the frontend (ONE-TIME)
+### 6. Set up the frontend (ONE-TIME)
 
 ```bash
 cd frontend
 npm install
 ```
 
-## Starting the app (EVERY TIME)
+### 7. Create the first admin (ONE-TIME)
 
-**1. Make sure the database is running.**
+Start the app (next section), open http://localhost:5173 and choose **Set up the first admin account**. The first account created is always the admin. After that, people join through **Request to join**, or an admin adds them under **Team & access**.
+
+### Optional: load the demo firm (ONE-TIME)
+
+For trying things out. **Do not do this on a real firm's database.** It adds sample records and accounts with published passwords. Run it instead of step 7, on an empty database:
 
 ```bash
-# Docker
-docker start law-firm-postgres
+docker exec -i law-firm-postgres psql -U postgres -d law_firm_db -v ON_ERROR_STOP=1 < database/sample_data.sql
+docker exec -i law-firm-postgres psql -U postgres -d law_firm_db -v ON_ERROR_STOP=1 < database/sample_activity.sql
+```
 
-# apt: normally already running after a reboot
-sudo systemctl start postgresql
+| Username | Password | Role |
+|---|---|---|
+| `admin` | `admin123` | admin |
+| `lawyer1` | `lawyer123` | lawyer |
+| `staff1` | `staff123` | staff |
+
+## Starting the app (EVERY TIME)
+
+**1. Make sure the databases are running.** They restart with the machine, so this is usually a no-op.
+
+```bash
+docker start law-firm-postgres law-firm-mongo
 ```
 
 **2. Start the backend in one terminal, and leave it running.**
@@ -190,46 +198,83 @@ The API is at http://localhost:8000 and its interactive docs are at http://local
 
 ```bash
 cd frontend
-npm run electron:start
+npm run dev                  # browser: http://localhost:5173
+npm run electron:start       # or the desktop window
 ```
 
-To stop, press `Ctrl+C` in both terminals. The Docker container keeps running until you run `docker stop law-firm-postgres`.
-
-### Demo logins
-
-| Username | Password | Role |
-|---|---|---|
-| `admin` | `admin123` | admin |
-| `lawyer1` | `lawyer123` | lawyer |
-| `staff1` | `staff123` | staff |
+To stop, press `Ctrl+C` in both terminals. The containers keep running until you run `docker stop law-firm-postgres law-firm-mongo`.
 
 ## Occasional commands
 
-**Reset the database to the sample firm.** This deletes all data.
+**After pulling new code:** a change can include new migrations or packages, so run all of these.
 
 ```bash
-# Docker
-docker exec -i law-firm-postgres psql -U postgres -d law_firm_db -v ON_ERROR_STOP=1 < database/law_firm_schema.sql
-
-# apt
-psql -h localhost -U postgres -d law_firm_db -v ON_ERROR_STOP=1 -f database/law_firm_schema.sql
+cd backend
+source venv/bin/activate
+pip install -r ../requirements.txt
+alembic upgrade head
+python -m mongo_migrations upgrade
+cd ../frontend
+npm install
 ```
 
-**After pulling changes that update dependencies:**
+**See or undo migrations:**
 
 ```bash
-(cd backend && source venv/bin/activate && pip install -r ../requirements.txt)
-(cd frontend && npm install)
+cd backend
+source venv/bin/activate
+alembic current                       # PostgreSQL: where you are
+alembic history
+alembic downgrade -1                  # undo the last one (can lose its data)
+python -m mongo_migrations status     # MongoDB
+python -m mongo_migrations downgrade  # undo the last one
 ```
 
-**Rebuild the classifier's training data.** You normally don't need this, because `backend/ml_data/matter_types.csv` is already in git. See the notes at the top of `backend/ml_data/build_matter_dataset.py`.
+**Write a new migration.** Add a file to `backend/migrations/versions/` by hand, using an existing one as the pattern, or to `backend/mongo_migrations/` for MongoDB (`m003_name.py` with `upgrade(db)` and `downgrade(db)`). Avoid `alembic revision --autogenerate`: indexes, triggers and views live only in migrations, so it would propose dropping them.
 
-**Build a Linux package:**
+**Back up the databases.** Run this regularly on real data. Records and files live separately, so you need both.
 
 ```bash
-cd frontend
-npm run electron:build-linux
+docker exec law-firm-postgres pg_dump -U postgres -Fc law_firm_db > law_firm_db_$(date +%F).dump
+docker exec law-firm-mongo mongodump --quiet --db law_firm_documents --archive > law_firm_files_$(date +%F).archive
 ```
+
+**Restore from a backup.** This overwrites what is there.
+
+```bash
+docker exec -i law-firm-postgres pg_restore -U postgres -d law_firm_db --clean --if-exists < YOUR_BACKUP.dump
+docker exec -i law-firm-mongo mongorestore --quiet --drop --archive < YOUR_BACKUP.archive
+```
+
+**Reset to an empty database.** This deletes all PostgreSQL data.
+
+```bash
+cd backend
+source venv/bin/activate
+alembic downgrade base
+alembic upgrade head
+```
+
+**Run the tests.** They create and delete their own databases, and need both containers running.
+
+```bash
+cd backend
+source venv/bin/activate
+python -m pytest tests -q
+```
+
+**Retrain models** when the data changes, or train the older locality and forecast models, which are admin-only API routes. These two need the database URL, because `train_models.py` does not read `.env`:
+
+```bash
+cd backend
+source venv/bin/activate
+export "$(grep '^DATABASE_URL=' .env)"
+python train_models.py --model all
+```
+
+**Rebuild the classifier's training data.** You normally don't need this, because `backend/ml_data/matter_types.csv` is in git. See the notes at the top of `backend/ml_data/build_matter_dataset.py`.
+
+**Point the frontend at another server** when building: `VITE_API_URL=https://your-server/api/v1 npm run build`.
 
 ## Troubleshooting
 
@@ -243,36 +288,37 @@ kill <PID>
 **Backend can't connect to the database**
 
 ```bash
-docker ps                                  # Docker: is law-firm-postgres up?
-systemctl status postgresql                # apt: is the service active?
+docker ps                                  # are both containers up?
 grep '^DATABASE_URL=' backend/.env         # does the password match?
 ```
 
+**`column ... does not exist` or `relation ... does not exist`**: the database is behind the code. Run `alembic upgrade head` from `backend/`.
+
 **`No module named ...`**: the virtual environment isn't active. Run `source venv/bin/activate` from `backend/`.
 
-**`Matter classifier not trained`**: run the training step in section 4.
+**"File storage is not reachable"**: MongoDB isn't running. Run `docker start law-firm-mongo`.
 
-**Training can't connect to the database**: you skipped the `export` line in section 4. It only lasts for the current terminal.
+**"Matter classifier not trained"**: run step 5.
+
+**Connection reset on a published Docker port**: use `--network host` as shown in step 2, rather than `-p`.
 
 **"Login failed" in the app**: check that the backend is running, and that `ALLOWED_ORIGINS` in `backend/.env` includes `http://localhost:5173`.
 
-**Evidence file upload fails**: file storage needs MongoDB. Everything else works without it.
+**A lawyer sees no matters**: their account may not be linked to a lawyer record, or they aren't assigned to anything. Check under **Team & access** and on the matter.
 
-**Electron says it failed to install, or the app won't open**
+**Electron says it failed to install, or won't open**
 
 ```bash
 cd frontend
 node node_modules/electron/install.js
 ```
 
-If it reports a sandbox error (`chrome-sandbox` or `setuid`), start it with the sandbox off. Use this for local development only:
+If it reports a sandbox error (`chrome-sandbox` or `setuid`), use the browser, or start Electron with the sandbox off, for local development only:
 
 ```bash
-npm run dev                                                # terminal 1
+npm run dev                                                                            # terminal 1
 npx wait-on http://localhost:5173 && NODE_ENV=development npx electron . --no-sandbox   # terminal 2
 ```
-
-**Blank window**: run `npm run dev` and `npm run electron` in separate terminals to see which one reports the error.
 
 ## Project structure
 
@@ -282,46 +328,31 @@ npx wait-on http://localhost:5173 && NODE_ENV=development npx electron . --no-sa
 │   ├── app/
 │   │   ├── main.py            # App entry point
 │   │   ├── config.py          # Settings loaded from .env
-│   │   ├── database.py        # Database connection
-│   │   ├── seed.py            # Sample data for an empty database
 │   │   ├── ai_models/         # Classifier, locality model, forecaster
-│   │   ├── core/              # JWT and password security
+│   │   ├── core/              # Security, role rules (permissions.py), audit log
 │   │   ├── models/            # Database models
 │   │   ├── schemas/           # Request and response schemas
 │   │   └── routers/           # API endpoints
+│   ├── migrations/            # PostgreSQL migrations (Alembic)
+│   ├── mongo_migrations/      # MongoDB migrations
 │   ├── ml_data/               # Classifier training data and its build script
-│   ├── train_models.py        # Trains the ML models
-│   └── .env.example           # Settings template
+│   ├── tests/                 # API tests
+│   └── train_models.py        # Trains the ML models
 ├── frontend/
 │   ├── electron/main.js       # Electron main process
 │   └── src/
 │       ├── theme.js           # Colors, fonts, component styles
-│       ├── components/        # Layout, status chip, matter type assistant
+│       ├── components/        # ui.jsx (shared parts), work.jsx, MatterForm, Layout
 │       ├── context/           # Login state
+│       ├── hooks/             # Data loading
 │       ├── pages/             # Screens
 │       └── services/api.js    # API client
 ├── database/
-│   └── law_firm_schema.sql    # Tables, triggers, views, functions, sample data
+│   ├── sample_data.sql        # Demo firm (optional)
+│   └── sample_activity.sql    # Demo hearings and tasks (optional)
 ├── requirements.txt           # Backend packages
-├── requirements-ml.txt        # Every optional ML package (very large)
-└── PROJECT_GUIDE.md           # Design and schema reference
+└── requirements-ml.txt        # Every optional ML package (very large)
 ```
-
-## Creating users
-
-**Using the API docs:** open http://localhost:8000/docs, click **Authorize**, and log in as an admin. Then open `POST /api/v1/auth/register`, click **Try it out**, and send:
-
-```json
-{
-  "username": "newuser",
-  "email": "newuser@example.com",
-  "password": "password123",
-  "full_name": "New User Name",
-  "role": "lawyer"
-}
-```
-
-Roles are `admin`, `lawyer` and `staff`.
 
 ## Contributing
 

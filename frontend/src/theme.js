@@ -17,14 +17,6 @@ export const tokens = {
   sidebar: '#0F1E46',
 };
 
-// Matter status colours. Always shown with a text label, never colour alone.
-export const statusColors = {
-  Filed: { bg: '#E0E7FF', fg: '#1E3A8A' },
-  Hearing: { bg: '#FEF3C7', fg: '#92400E' },
-  Pending: { bg: '#F1F5F9', fg: '#334155' },
-  Disposed: { bg: '#DCFCE7', fg: '#166534' },
-};
-
 const headingFont = '"EB Garamond", Georgia, "Times New Roman", serif';
 const bodyFont = 'Lato, system-ui, -apple-system, "Segoe UI", sans-serif';
 

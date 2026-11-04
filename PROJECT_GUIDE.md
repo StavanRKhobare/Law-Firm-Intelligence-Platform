@@ -1,5 +1,7 @@
 # Law firm case management: project guide
 
+> **Schema additions.** Migrations 0002 to 0004 added `join_request`, `hearing`, `case_note`, `task` and `audit_log`, and new columns on `users`, `lawyer`, `legal_case` and `evidence`. The tables below describe the baseline (`backend/migrations/sql/0001_baseline.sql`). File bytes are now in MongoDB GridFS (bucket `evidence_fs`), and `evidence.mongo_id` is the GridFS file id.
+
 This is the reference for the system as it stands after the domain change. The runnable code is in `crime_intelligence_platform/`. That folder name is historical. The database, API, and screens now describe one litigation firm.
 
 The previous police dump is still at `crime_intelligence_platform/database/crime_intelligence_db_backup.sql`. Leave it as the record of the old schema. Do not import it into `law_firm_db`.
@@ -35,58 +37,18 @@ These were the choices that kept the DBMS work intact.
 | How many clients per matter? | Many, through `case_client`. A client can appear on many matters. |
 | Can the same person be client and opponent? | Not in this version. Client means the party the firm represents. Opposing party means the adverse side. A person who switches sides across matters would be stored twice. |
 | Does the system remember old courts? | No. `legal_case.court_id` is the current forum. Court-transfer history is out of scope. |
-| Are hearings a table? | No. Progress is `legal_case.status` plus `case_status_audit`. |
+| Are hearings a table? | Yes, since migration 0003: `hearing`, with one row per listing. `case_note` holds remarks. `legal_case.status` plus `case_status_audit` still record overall progress. |
 | Which courts are stored? | The forums this sample firm appears before, not every court in India. |
 
-The sample data uses Bengaluru and Karnataka so the rows are concrete. Edit `database/law_firm_schema.sql` and `backend/app/seed.py` if the firm should sit in another city. The table shapes do not depend on that city.
+The sample data uses Bengaluru and Karnataka so the rows are concrete. Edit `database/sample_data.sql` and `backend/app/seed.py` if the firm should sit in another city. The table shapes do not depend on that city.
 
 Organisations use the same name columns as people. "Helios Components" / "Pvt Ltd" is a client. A separate organisation entity was not added.
 
 ## 3. How to run it
 
-PostgreSQL is the database the paper should describe. Triggers, views, stored functions, and the partial unique index exist only after `law_firm_schema.sql` is loaded.
+[README.md](README.md) has the Linux commands. PostgreSQL is the database the paper should describe. The schema comes from Alembic migrations in `backend/migrations/`, which create every trigger, view, function and partial index. MongoDB migrations are in `backend/mongo_migrations/`.
 
-```sql
-CREATE DATABASE law_firm_db;
-```
-
-```bash
-psql -U postgres -d law_firm_db -f crime_intelligence_platform/database/law_firm_schema.sql
-```
-
-Point `crime_intelligence_platform/backend/.env` at that database:
-
-```env
-DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/law_firm_db
-```
-
-Then, from `crime_intelligence_platform/backend`:
-
-```bash
-pip install -r ../requirements.txt
-uvicorn app.main:app --reload
-```
-
-From `crime_intelligence_platform/frontend`:
-
-```bash
-npm install
-npm run electron:start
-```
-
-API docs: `http://localhost:8000/docs`
-
-The checked-in `.env` currently uses SQLite (`sqlite:///./law_firm.db`) so the API can start without PostgreSQL. On startup, if `legal_case` is empty, `backend/app/seed.py` inserts the same sample firm. SQLite will not create the triggers, views, functions, or the partial unique index. Use PostgreSQL for anything you cite as a DBMS feature.
-
-Sample logins, in both the SQL script and the SQLite seed:
-
-| Username | Password | Role |
-|---|---|---|
-| admin | admin123 | admin |
-| lawyer1 | lawyer123 | lawyer |
-| staff1 | staff123 | staff |
-
-Roles are `admin`, `lawyer`, and `staff`. The `lawyer1` account is named Ananya Rao. It is not a foreign key to the lawyer row.
+Roles are `admin`, `lawyer`, and `staff`, enforced in `backend/app/core/permissions.py`. A login links to its lawyer record through `users.lawyer_id`.
 
 ### The loaded sample
 
@@ -282,7 +244,7 @@ Login accounts are separate from `lawyer`. A login can be an admin or a records 
 
 ## 7. Integrity objects
 
-These are created by `law_firm_schema.sql`.
+These are created by `0001_baseline.sql`.
 
 **Checks.** Status values, evidence status, assignment role, sex, filing date against cause of action, and assignment end date against start date.
 
@@ -557,7 +519,7 @@ Suggested sections:
 
 Update both copies of the sample, or they will drift:
 
-- `crime_intelligence_platform/database/law_firm_schema.sql`
+- `crime_intelligence_platform/backend/migrations/sql/0001_baseline.sql`
 - `crime_intelligence_platform/backend/app/seed.py`
 
 `seed.py` runs only when `legal_case` is empty. After the SQL script has loaded rows, the API will not insert a second copy.

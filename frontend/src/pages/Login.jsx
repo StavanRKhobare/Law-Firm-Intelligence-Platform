@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, TextField, Button, Typography, Alert, InputAdornment, IconButton } from '@mui/material';
 import { AccountBalance, Visibility, VisibilityOff } from '@mui/icons-material';
 import { tokens } from '../theme';
+import { authAPI } from '../services/api';
+import { TextLink } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
@@ -13,6 +15,11 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [needsAdmin, setNeedsAdmin] = useState(false);
+
+  useEffect(() => {
+    authAPI.setupStatus().then(({ data }) => setNeedsAdmin(data.needs_first_admin)).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,7 +29,7 @@ export default function Login() {
     const result = await login({ username, password });
 
     if (result.success) {
-      navigate('/');
+      navigate(result.user.must_change_password ? '/change-password' : '/');
     } else {
       setError(result.error);
     }
@@ -115,12 +122,9 @@ export default function Login() {
             </Button>
           </Box>
 
-          <Box sx={{ mt: 4, p: 2, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }} display="block">
-              Demo accounts
-            </Typography>
-            <Typography variant="caption" display="block">admin / admin123 · lawyer1 / lawyer123</Typography>
-          </Box>
+          <Typography variant="body2" sx={{ mt: 3 }} align="center">
+            New to the firm? <TextLink to="/join">{needsAdmin ? 'Set up the first admin account' : 'Request to join'}</TextLink>
+          </Typography>
         </Box>
       </Box>
     </Box>
