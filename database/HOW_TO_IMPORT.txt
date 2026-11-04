@@ -1,0 +1,17 @@
+DATABASE IMPORT INSTRUCTIONS
+============================
+
+1. Open pgAdmin or psql
+
+2. Create database:
+   CREATE DATABASE crime_intelligence_db;
+
+3. Import the backup:
+   psql -U postgres -d crime_intelligence_db -f crime_intelligence_db_backup.sql
+
+4. Verify:
+   psql -U postgres -d crime_intelligence_db
+   \dt
+   SELECT COUNT(*) FROM users;
+
+That's it! Database is ready.

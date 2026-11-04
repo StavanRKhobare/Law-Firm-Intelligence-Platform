@@ -1,0 +1,42 @@
+"""Models package - exports all database models"""
+from .models import (
+    PracticeGroup,
+    PincodeArea,
+    Location,
+    Court,
+    Lawyer,
+    Client,
+    OpposingParty,
+    LegalCase,
+    CaseLawyer,
+    Evidence,
+    CaseClient,
+    CaseOpposingParty,
+    ClientPhoneNo,
+    OpposingPartyPhoneNo,
+    MatterType,
+    StatuteSection,
+    CaseStatusAudit,
+)
+from .user import User
+
+__all__ = [
+    "PracticeGroup",
+    "PincodeArea",
+    "Location",
+    "Court",
+    "Lawyer",
+    "Client",
+    "OpposingParty",
+    "LegalCase",
+    "CaseLawyer",
+    "Evidence",
+    "CaseClient",
+    "CaseOpposingParty",
+    "ClientPhoneNo",
+    "OpposingPartyPhoneNo",
+    "MatterType",
+    "StatuteSection",
+    "CaseStatusAudit",
+    "User",
+]
