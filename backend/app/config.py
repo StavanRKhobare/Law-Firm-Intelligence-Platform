@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     
     APP_NAME: str = "Law Firm Case Management API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
+    # Fill an empty SQLite database with the sample firm. PostgreSQL uses database/sample_data.sql.
+    SEED_SAMPLE_DATA: bool = False
     
     DATABASE_URL: str
     
@@ -30,12 +32,19 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 10
     MAX_PAGE_SIZE: int = 100
     
-    MAX_FILE_SIZE: int = 10485760
+    MAX_FILE_SIZE: int = 52428800
     ALLOWED_FILE_TYPES: List[str] = [
         "image/jpeg",
         "image/png",
         "application/pdf",
+        "image/tiff",
         "video/mp4",
+        "audio/mpeg",
+        "text/plain",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ]
     UPLOAD_DIR: str = "./uploads"
     

@@ -134,23 +134,28 @@ async def get_current_user(
     """
     user = get_user_from_token(token, db)
     
+    # 401, so a deactivated person's open session ends immediately
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account has been deactivated",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
     return user
 
 
+PASSWORD_CHANGE_REQUIRED = "Password change required"
+
+
 async def get_current_active_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Get current active user"""
-    if not current_user.is_active:
+    """The logged-in user, once any temporary password has been replaced."""
+    if current_user.must_change_password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=PASSWORD_CHANGE_REQUIRED,
         )
     return current_user
 
@@ -164,7 +169,7 @@ def require_role(allowed_roles: list):
         async def admin_route():
             ...
     """
-    async def role_checker(current_user: User = Depends(get_current_user)):
+    async def role_checker(current_user: User = Depends(get_current_active_user)):
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

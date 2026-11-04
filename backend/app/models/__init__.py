@@ -17,6 +17,11 @@ from .models import (
     MatterType,
     StatuteSection,
     CaseStatusAudit,
+    Hearing,
+    CaseNote,
+    Task,
+    JoinRequest,
+    AuditLog,
 )
 from .user import User
 
@@ -38,5 +43,10 @@ __all__ = [
     "MatterType",
     "StatuteSection",
     "CaseStatusAudit",
+    "Hearing",
+    "CaseNote",
+    "Task",
+    "JoinRequest",
+    "AuditLog",
     "User",
 ]

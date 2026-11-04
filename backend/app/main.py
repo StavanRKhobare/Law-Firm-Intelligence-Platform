@@ -1,14 +1,20 @@
 """
 Main FastAPI application for the law-firm case management platform.
 """
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from contextlib import asynccontextmanager
 from .config import settings
 from .database import engine, Base, SessionLocal
 from .seed import seed_if_empty
 from .core.security import get_current_active_user
-from .routers import cases, lawyers, clients, opposing_parties, evidence, auth, analytics
+from .core.security import require_role
+from .routers import (
+    audit, cases, lawyers, clients, opposing_parties, evidence, auth, analytics,
+    hearings, search, tasks, team, workspace,
+)
 try:
     from app.routers import ai_analytics
     AI_ROUTER_AVAILABLE = True
@@ -16,18 +22,22 @@ except Exception as e:  # ML deps (sklearn/xgboost/prophet) are optional
     ai_analytics = None
     AI_ROUTER_AVAILABLE = False
     print(f"AI analytics router disabled (optional ML deps missing): {e}")
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# On PostgreSQL the schema belongs to migrations (alembic upgrade head). create_all
+# there would make tables without their triggers, views and partial indexes.
+if engine.dialect.name == "sqlite":
+    Base.metadata.create_all(bind=engine)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run on application startup/shutdown (replaces deprecated @app.on_event)"""
-    db = SessionLocal()
-    try:
-        seed_if_empty(db)
-    finally:
-        db.close()
+    # Never load sample data (with its known passwords) unless asked to
+    if settings.SEED_SAMPLE_DATA:
+        db = SessionLocal()
+        try:
+            seed_if_empty(db)
+        finally:
+            db.close()
     print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     print("API documentation: http://localhost:8000/docs")
     print(f"Debug mode: {settings.DEBUG}")
@@ -52,7 +62,23 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    """A constraint rejected the change, usually a duplicate or a value in use elsewhere."""
+    return JSONResponse(status_code=409, content={"detail": "This conflicts with an existing record"})
+
+
+@app.exception_handler(DBAPIError)
+async def database_rule_handler(request: Request, exc: DBAPIError):
+    """Triggers raise readable messages, such as dates in the wrong order. Pass those on."""
+    if getattr(getattr(exc, "orig", None), "sqlstate", None) == "P0001":
+        return JSONResponse(status_code=400, content={"detail": str(exc.orig).split("\n")[0]})
+    print(f"Database error: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "Database error"})
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -134,11 +160,33 @@ app.include_router(
     dependencies=protected,
 )
 
+# Firm-wide figures are for admins. Everyone else has /workspace.
 app.include_router(
     analytics.router,
     prefix=f"{API_V1_PREFIX}/analytics",
     tags=["Analytics"],
+    dependencies=[Depends(require_role(["admin"]))],
+)
+
+app.include_router(
+    cases.locations_router,
+    prefix=f"{API_V1_PREFIX}/locations",
+    tags=["Locations"],
     dependencies=protected,
+)
+
+# /team sets its own rules: the directory is for everyone, the rest is admin-only.
+app.include_router(team.router, prefix=f"{API_V1_PREFIX}/team", tags=["Team"], dependencies=protected)
+app.include_router(hearings.router, prefix=f"{API_V1_PREFIX}/hearings", tags=["Hearings"], dependencies=protected)
+app.include_router(tasks.router, prefix=f"{API_V1_PREFIX}/tasks", tags=["Tasks"], dependencies=protected)
+app.include_router(workspace.router, prefix=f"{API_V1_PREFIX}/workspace", tags=["Workspace"], dependencies=protected)
+app.include_router(search.router, prefix=f"{API_V1_PREFIX}/search", tags=["Search"], dependencies=protected)
+app.include_router(search.conflicts_router, prefix=f"{API_V1_PREFIX}/conflicts", tags=["Conflict check"], dependencies=protected)
+app.include_router(
+    audit.router,
+    prefix=f"{API_V1_PREFIX}/audit",
+    tags=["Audit log"],
+    dependencies=[Depends(require_role(["admin"]))],
 )
 if AI_ROUTER_AVAILABLE:
     app.include_router(ai_analytics.router, dependencies=protected)

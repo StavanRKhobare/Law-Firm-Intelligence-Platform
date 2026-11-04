@@ -5,12 +5,19 @@ The database represents one litigation firm. Practice groups are teams inside
 that firm. Courts are the forums currently hearing a matter. Locations are the
 places connected to the dispute, normalised through pincode_area.
 """
+from datetime import datetime, timezone
+
 from sqlalchemy import (
-    Column, Integer, String, Text, Date, DateTime, Boolean,
+    BigInteger, Column, Integer, String, Text, Date, DateTime, Time, Boolean,
     ForeignKey, CheckConstraint,
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
+
+
+def utcnow():
+    # Timestamp columns are naive and hold UTC
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class PracticeGroup(Base):
@@ -70,6 +77,9 @@ class Lawyer(Base):
     designation = Column(String(50))
     phoneno = Column(String(15))
     bar_id = Column(String(50), unique=True)
+    email = Column(String(100), unique=True)
+    joined_date = Column(Date)
+    is_active = Column(Boolean, nullable=False, default=True)
     group_id = Column(Integer, ForeignKey("practice_group.group_id", ondelete="SET NULL", onupdate="CASCADE"))
 
     practice_group = relationship("PracticeGroup", back_populates="lawyers")
@@ -127,6 +137,10 @@ class LegalCase(Base):
     status = Column(String(50), default="Filed")
     court_id = Column(Integer, ForeignKey("court.court_id", ondelete="SET NULL", onupdate="CASCADE"))
     location_id = Column(Integer, ForeignKey("location.location_id", ondelete="SET NULL", onupdate="CASCADE"))
+    disposed_on = Column(Date)
+    outcome = Column(String(30))
+    created_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
         CheckConstraint("date_filed >= date_cause", name="legal_case_date_check"),
@@ -145,6 +159,9 @@ class LegalCase(Base):
     clients = relationship("Client", secondary="case_client", back_populates="cases")
     opposing_parties = relationship("OpposingParty", secondary="case_opposing_party", back_populates="cases")
     status_history = relationship("CaseStatusAudit", back_populates="legal_case", cascade="all, delete-orphan")
+    hearings = relationship("Hearing", back_populates="legal_case", cascade="all, delete-orphan")
+    notes = relationship("CaseNote", back_populates="legal_case", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="legal_case", cascade="all, delete-orphan")
 
 
 class CaseLawyer(Base):
@@ -172,6 +189,10 @@ class CaseLawyer(Base):
     legal_case = relationship("LegalCase", back_populates="assignments")
     lawyer = relationship("Lawyer", back_populates="assignments")
 
+    @property
+    def lawyer_name(self):
+        return f"{self.lawyer.fname} {self.lawyer.lname}" if self.lawyer else None
+
 
 class Evidence(Base):
     __tablename__ = "evidence"
@@ -183,11 +204,22 @@ class Evidence(Base):
     status = Column(String(50), default="Received")
     lawyer_id = Column(Integer, ForeignKey("lawyer.lawyer_id", ondelete="SET NULL", onupdate="CASCADE"))
     case_id = Column(Integer, ForeignKey("legal_case.case_id", ondelete="CASCADE", onupdate="CASCADE"))
+    category = Column(String(30), nullable=False, default="Evidence")
+    file_name = Column(String(255))
+    content_type = Column(String(150))
+    file_size = Column(BigInteger)
+    sha256 = Column(String(64))
+    uploaded_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    uploaded_at = Column(DateTime)
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('Received', 'Under Review', 'Filed', 'Produced')",
             name="evidence_status_check",
+        ),
+        CheckConstraint(
+            "category IN ('Evidence', 'Pleading', 'Order', 'Correspondence', 'Draft', 'Other')",
+            name="evidence_category_check",
         ),
     )
 
@@ -256,3 +288,120 @@ class CaseStatusAudit(Base):
     changed_by = Column(String(100))
 
     legal_case = relationship("LegalCase", back_populates="status_history")
+
+
+class Hearing(Base):
+    """One listing of a matter. An adjournment closes this row and schedules a new one."""
+
+    __tablename__ = "hearing"
+
+    hearing_id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("legal_case.case_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
+    hearing_date = Column(Date, nullable=False)
+    hearing_time = Column(Time)
+    court_id = Column(Integer, ForeignKey("court.court_id", ondelete="SET NULL", onupdate="CASCADE"))
+    courtroom = Column(String(50))
+    judge = Column(String(100))
+    purpose = Column(String(200))
+    status = Column(String(20), nullable=False, default="Scheduled")
+    outcome = Column(Text)
+    remarks = Column(Text)
+    attended_by = Column(Integer, ForeignKey("lawyer.lawyer_id", ondelete="SET NULL", onupdate="CASCADE"))
+    created_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('Scheduled', 'Held', 'Adjourned', 'Cancelled')",
+            name="hearing_status_check",
+        ),
+    )
+
+    legal_case = relationship("LegalCase", back_populates="hearings")
+    court = relationship("Court")
+    attending_lawyer = relationship("Lawyer")
+
+
+class CaseNote(Base):
+    __tablename__ = "case_note"
+
+    note_id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("legal_case.case_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
+    body = Column(Text, nullable=False)
+    author_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    author_name = Column(String(100))
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+
+    legal_case = relationship("LegalCase", back_populates="notes")
+
+
+class Task(Base):
+    """Work item or legal deadline. Any kind other than Task must have a due date."""
+
+    __tablename__ = "task"
+
+    task_id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text)
+    kind = Column(String(20), nullable=False, default="Task")
+    priority = Column(String(10), nullable=False, default="Normal")
+    status = Column(String(20), nullable=False, default="Open")
+    due_date = Column(Date)
+    case_id = Column(Integer, ForeignKey("legal_case.case_id", ondelete="CASCADE", onupdate="CASCADE"))
+    assignee_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    created_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('Task', 'Limitation', 'Filing', 'Compliance', 'Reply')", name="task_kind_check"),
+        CheckConstraint("priority IN ('Low', 'Normal', 'High')", name="task_priority_check"),
+        CheckConstraint("status IN ('Open', 'In Progress', 'Done')", name="task_status_check"),
+        CheckConstraint("kind = 'Task' OR due_date IS NOT NULL", name="task_deadline_needs_date"),
+    )
+
+    legal_case = relationship("LegalCase", back_populates="tasks")
+    assignee = relationship("User", foreign_keys=[assignee_id])
+
+
+class JoinRequest(Base):
+    """Self-registration waiting for an admin."""
+
+    __tablename__ = "join_request"
+
+    request_id = Column(Integer, primary_key=True, autoincrement=True)
+    fname = Column(String(50), nullable=False)
+    lname = Column(String(50), nullable=False)
+    username = Column(String(50), nullable=False)
+    email = Column(String(100), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    phoneno = Column(String(15))
+    requested_role = Column(String(20), nullable=False, default="lawyer")
+    bar_id = Column(String(50))
+    designation = Column(String(50))
+    group_id = Column(Integer, ForeignKey("practice_group.group_id", ondelete="SET NULL", onupdate="CASCADE"))
+    message = Column(Text)
+    status = Column(String(20), nullable=False, default="Pending")
+    review_note = Column(Text)
+    reviewed_by = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL", onupdate="CASCADE"))
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+
+    practice_group = relationship("PracticeGroup")
+
+
+class AuditLog(Base):
+    """Append-only (enforced by a trigger). No foreign keys, so entries outlive what they describe."""
+
+    __tablename__ = "audit_log"
+
+    log_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    user_id = Column(Integer)
+    username = Column(String(50))
+    action = Column(String(50), nullable=False)
+    entity_type = Column(String(30), nullable=False)
+    entity_id = Column(String(50))
+    case_id = Column(Integer)
+    detail = Column(Text)

@@ -1,18 +1,19 @@
-"""Pydantic schemas for evidence metadata."""
-from typing import Optional, List
-from datetime import date
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+"""Pydantic schemas for documents and evidence. File bytes are in MongoDB, metadata here."""
+from datetime import date, datetime
+from typing import List, Optional
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 EVIDENCE_STATUSES = ["Received", "Under Review", "Filed", "Produced"]
+DOCUMENT_CATEGORIES = ["Evidence", "Pleading", "Order", "Correspondence", "Draft", "Other"]
 
 
-class EvidenceBase(BaseModel):
+class EvidenceUpdate(BaseModel):
     description: Optional[str] = None
-    filed_date: date
-    status: str = Field(default="Received")
+    filed_date: Optional[date] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
     lawyer_id: Optional[int] = None
-    case_id: int
 
     @field_validator("status")
     @classmethod
@@ -21,22 +22,11 @@ class EvidenceBase(BaseModel):
             raise ValueError(f"Status must be one of: {', '.join(EVIDENCE_STATUSES)}")
         return v
 
-
-class EvidenceCreate(EvidenceBase):
-    pass
-
-
-class EvidenceUpdate(BaseModel):
-    description: Optional[str] = None
-    filed_date: Optional[date] = None
-    status: Optional[str] = None
-    lawyer_id: Optional[int] = None
-
-    @field_validator("status")
+    @field_validator("category")
     @classmethod
-    def validate_status(cls, v):
-        if v not in EVIDENCE_STATUSES:
-            raise ValueError(f"Status must be one of: {', '.join(EVIDENCE_STATUSES)}")
+    def validate_category(cls, v):
+        if v not in DOCUMENT_CATEGORIES:
+            raise ValueError(f"Category must be one of: {', '.join(DOCUMENT_CATEGORIES)}")
         return v
 
     @field_validator("filed_date")
@@ -47,57 +37,27 @@ class EvidenceUpdate(BaseModel):
         return v
 
 
-class LawyerBrief(BaseModel):
-    lawyer_id: int
-    fname: str
-    lname: str
-    designation: Optional[str] = None
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CaseBrief(BaseModel):
+class EvidenceResponse(BaseModel):
+    evidence_id: int
     case_id: int
-    matter_title: str
-    case_number: str
-    status: str
-    model_config = ConfigDict(from_attributes=True)
-
-
-class FileInfo(BaseModel):
-    filename: str
-    content_type: str
-    size: int
-    upload_date: str
-    mongo_id: str
-
-
-class EvidenceResponse(EvidenceBase):
-    evidence_id: int
-    mongo_id: Optional[str] = None
-    lawyer: Optional[LawyerBrief] = None
-    legal_case: Optional[CaseBrief] = None
-    has_file: bool = False
-    model_config = ConfigDict(from_attributes=True)
-
-
-class EvidenceDetailed(EvidenceResponse):
-    file_info: Optional[FileInfo] = None
-    model_config = ConfigDict(from_attributes=True)
-
-
-class EvidenceList(BaseModel):
-    evidence_id: int
+    case_number: Optional[str] = None
+    case_title: Optional[str] = None
     description: Optional[str] = None
     filed_date: date
     status: str
-    case_title: Optional[str] = None
+    category: str
+    lawyer_id: Optional[int] = None
     lawyer_name: Optional[str] = None
     has_file: bool = False
+    file_name: Optional[str] = None
+    content_type: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedEvidence(BaseModel):
-    items: List[EvidenceList]
+    items: List[EvidenceResponse]
     total: int
     page: int
     size: int

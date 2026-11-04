@@ -75,6 +75,7 @@ class PartyList(BaseModel):
     email: Optional[str] = None
     repeat_party: bool = False
     total_cases: int = 0
+    can_open: bool = True
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -58,6 +58,7 @@ def _require_ml():
 router = APIRouter(prefix="/api/v1/ai", tags=["AI Analytics"])
 
 from ..config import settings
+from ..core.security import require_role
 
 DB_URL = settings.DATABASE_URL
 
@@ -122,7 +123,7 @@ class TrendAnalysis(BaseModel):
 
 # ============= Endpoints =============
 
-@router.get("/hotspots", response_model=HotspotAnalysisResponse)
+@router.get("/hotspots", response_model=HotspotAnalysisResponse, dependencies=[Depends(require_role(["admin"]))])
 async def get_crime_hotspots(
     top_n: int = Query(10, description="Number of top hotspots to return"),
     min_crimes: int = Query(1, description="Minimum number of crimes for a location")
@@ -171,7 +172,7 @@ async def get_crime_hotspots(
         raise HTTPException(status_code=500, detail=f"Hotspot analysis failed: {str(e)}")
 
 
-@router.get("/hotspots/trends", response_model=List[TrendAnalysis])
+@router.get("/hotspots/trends", response_model=List[TrendAnalysis], dependencies=[Depends(require_role(["admin"]))])
 async def get_hotspot_trends(
     days_ahead: int = Query(30, description="Number of days to predict ahead"),
     top_n: int = Query(10, description="Number of locations to return")
@@ -229,7 +230,7 @@ async def matter_classifier_info():
     }
 
 
-@router.get("/forecast/crimes", response_model=ForecastResponse)
+@router.get("/forecast/crimes", response_model=ForecastResponse, dependencies=[Depends(require_role(["admin"]))])
 async def forecast_crimes(
     periods: int = Query(30, description="Number of periods to forecast"),
     frequency: str = Query('D', description="Forecast frequency: D (daily), W (weekly), M (monthly)"),
@@ -299,7 +300,7 @@ async def forecast_crimes(
         raise HTTPException(status_code=500, detail=f"Forecasting failed: {str(e)}")
 
 
-@router.get("/analytics/summary")
+@router.get("/analytics/summary", dependencies=[Depends(require_role(["admin"]))])
 async def get_analytics_summary():
     """
     Get overall AI analytics summary
@@ -350,7 +351,7 @@ async def get_analytics_summary():
         raise HTTPException(status_code=500, detail=f"Summary generation failed: {str(e)}")
 
 
-@router.get("/models/status")
+@router.get("/models/status", dependencies=[Depends(require_role(["admin"]))])
 async def get_model_status():
     """
     Get status of all AI models

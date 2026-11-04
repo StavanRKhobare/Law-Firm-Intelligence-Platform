@@ -10,12 +10,21 @@ class PracticeGroupBrief(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PracticeGroupCreate(BaseModel):
+    group_name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    email: Optional[str] = Field(None, max_length=100)
+    contactno: Optional[str] = Field(None, max_length=15)
+
+
 class LawyerBase(BaseModel):
     fname: str = Field(..., min_length=1, max_length=50)
     lname: str = Field(..., min_length=1, max_length=50)
     designation: Optional[str] = Field(None, max_length=50)
     phoneno: Optional[str] = Field(None, max_length=15)
     bar_id: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = Field(None, max_length=100)
+    joined_date: Optional[date] = None
     group_id: Optional[int] = None
 
 
@@ -29,6 +38,8 @@ class LawyerUpdate(BaseModel):
     designation: Optional[str] = Field(None, max_length=50)
     phoneno: Optional[str] = Field(None, max_length=15)
     bar_id: Optional[str] = Field(None, max_length=50)
+    email: Optional[str] = Field(None, max_length=100)
+    joined_date: Optional[date] = None
     group_id: Optional[int] = None
 
     @field_validator("fname", "lname")
@@ -52,6 +63,7 @@ class CaseBrief(BaseModel):
 
 class LawyerResponse(LawyerBase):
     lawyer_id: int
+    is_active: bool = True
     practice_group: Optional[PracticeGroupBrief] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,7 +72,12 @@ class LawyerDetailed(LawyerResponse):
     total_cases: int = 0
     active_cases: int = 0
     disposed_cases: int = 0
-    recent_cases: List[CaseBrief] = []
+    upcoming_hearings: int = 0
+    overdue_tasks: int = 0
+    has_login: bool = False
+    # False: the user sees this colleague's public profile, without their matters
+    can_view_matters: bool = False
+    matters: List[CaseBrief] = []
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -71,6 +88,8 @@ class LawyerList(BaseModel):
     designation: Optional[str] = None
     group_name: Optional[str] = None
     total_cases: int = 0
+    is_active: bool = True
+    has_login: bool = False
     model_config = ConfigDict(from_attributes=True)
 
 

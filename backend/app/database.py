@@ -43,7 +43,7 @@ try:
     from pymongo import MongoClient
     
     # Sync MongoDB client (for simple operations)
-    mongo_client = MongoClient(settings.MONGODB_URL)
+    mongo_client = MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=3000)
     mongo_db = mongo_client[settings.MONGODB_DB]
     
     def get_mongo_db():

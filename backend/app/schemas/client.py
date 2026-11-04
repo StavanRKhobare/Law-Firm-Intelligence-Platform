@@ -75,6 +75,7 @@ class ClientList(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
     total_cases: int = 0
+    can_open: bool = True
     model_config = ConfigDict(from_attributes=True)
 
 

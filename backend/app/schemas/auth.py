@@ -27,41 +27,28 @@ class UserBase(BaseModel):
         return v
 
 
+def check_password(v: str) -> str:
+    # bcrypt rejects anything over 72 bytes
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Password is too long (72 bytes at most)")
+    return v
+
+
 class UserCreate(UserBase):
     """Schema for user registration"""
-    password: str = Field(..., min_length=6, max_length=100)
+    password: str = Field(..., min_length=8, max_length=100)
 
-
-class UserUpdate(BaseModel):
-    """Schema for updating user"""
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, v):
-        # an unknown (or null) role would make the account unusable and break the user list
-        if v not in ALLOWED_ROLES:
-            raise ValueError(f"Role must be one of: {', '.join(ALLOWED_ROLES)}")
-        return v
-
-    @field_validator("email", "is_active")
-    @classmethod
-    def not_null(cls, v):
-        if v is None:
-            raise ValueError("cannot be null")
-        return v
-
-
+    _check_password = field_validator("password")(check_password)
 
 
 class UserResponse(UserBase):
     """Schema for user response"""
     user_id: int
     is_active: bool
-    created_at: datetime  # Changed from str to datetime
+    created_at: datetime
+    lawyer_id: Optional[int] = None
+    must_change_password: bool = False
+    last_login_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,4 +74,123 @@ class TokenData(BaseModel):
 class PasswordChange(BaseModel):
     """Schema for password change"""
     old_password: str
-    new_password: str = Field(..., min_length=6, max_length=100)
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+    _check_password = field_validator("new_password")(check_password)
+
+
+# ============================================
+# TEAM: ONBOARDING
+# ============================================
+
+class JoinRequestCreate(BaseModel):
+    """What someone submits when asking to join the firm."""
+    fname: str = Field(..., min_length=1, max_length=50)
+    lname: str = Field(..., min_length=1, max_length=50)
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=100)
+    phoneno: Optional[str] = Field(None, max_length=15)
+    requested_role: str = "lawyer"
+    bar_id: Optional[str] = Field(None, max_length=50)
+    designation: Optional[str] = Field(None, max_length=50)
+    group_id: Optional[int] = None
+    message: Optional[str] = Field(None, max_length=2000)
+
+    _check_password = field_validator("password")(check_password)
+
+    @field_validator("requested_role")
+    @classmethod
+    def validate_role(cls, v):
+        if v not in ("lawyer", "staff"):
+            raise ValueError("Role must be lawyer or staff")
+        return v
+
+
+class JoinRequestResponse(BaseModel):
+    request_id: int
+    fname: str
+    lname: str
+    username: str
+    email: str
+    phoneno: Optional[str] = None
+    requested_role: str
+    bar_id: Optional[str] = None
+    designation: Optional[str] = None
+    group_id: Optional[int] = None
+    group_name: Optional[str] = None
+    message: Optional[str] = None
+    status: str
+    review_note: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JoinRequestApprove(BaseModel):
+    """The admin can correct or complete what the applicant entered."""
+    role: Optional[str] = None
+    bar_id: Optional[str] = Field(None, max_length=50)
+    designation: Optional[str] = Field(None, max_length=50)
+    group_id: Optional[int] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v):
+        if v is not None and v not in ALLOWED_ROLES:
+            raise ValueError(f"Role must be one of: {', '.join(ALLOWED_ROLES)}")
+        return v
+
+
+class JoinRequestReject(BaseModel):
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class MemberCreate(BaseModel):
+    """An admin adds someone directly. Pass lawyer_id to give an existing lawyer a login."""
+    fname: str = Field(..., min_length=1, max_length=50)
+    lname: str = Field(..., min_length=1, max_length=50)
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    role: str = "lawyer"
+    lawyer_id: Optional[int] = None
+    phoneno: Optional[str] = Field(None, max_length=15)
+    bar_id: Optional[str] = Field(None, max_length=50)
+    designation: Optional[str] = Field(None, max_length=50)
+    group_id: Optional[int] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v):
+        if v not in ALLOWED_ROLES:
+            raise ValueError(f"Role must be one of: {', '.join(ALLOWED_ROLES)}")
+        return v
+
+
+class MemberResponse(UserResponse):
+    lawyer_name: Optional[str] = None
+
+
+class MemberCreated(BaseModel):
+    """temporary_password is shown once and is never stored in clear text."""
+    member: MemberResponse
+    temporary_password: str
+
+
+class MemberRoleUpdate(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v):
+        if v not in ALLOWED_ROLES:
+            raise ValueError(f"Role must be one of: {', '.join(ALLOWED_ROLES)}")
+        return v
+
+
+class DirectoryEntry(BaseModel):
+    """Enough to pick a colleague from a list."""
+    user_id: int
+    name: str
+    role: str
+    lawyer_id: Optional[int] = None

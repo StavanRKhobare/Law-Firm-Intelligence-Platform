@@ -3,15 +3,16 @@ from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract, distinct
-from datetime import datetime, timedelta
-from collections import defaultdict
+from datetime import date, datetime, timedelta
+from collections import Counter, defaultdict
 
 from ..database import get_db
 from ..models.models import (
     LegalCase, Lawyer, Client, OpposingParty, Evidence,
     PracticeGroup, Location, PincodeArea, MatterType,
-    CaseLawyer, CaseOpposingParty, CaseClient,
+    CaseLawyer, CaseOpposingParty, CaseClient, Court, Hearing, JoinRequest, Task,
 )
+from ..models.user import User
 from ..schemas.analytics import (
     DashboardStats, CasesByStatus, CasesByMonth, MatterTypeStats,
     LocationCaseload, LawyerPerformance, PracticeGroupStats,
@@ -285,4 +286,150 @@ async def get_evidence_statistics(db: Session = Depends(get_db)):
         "without_files": total - with_files,
         "status_distribution": distribution,
         "cases_with_evidence": cases_with_evidence,
+    }
+
+
+@router.get("/firm")
+async def firm_overview(db: Session = Depends(get_db)):
+    """What a managing partner needs: risks, workload, how long matters take, how they end."""
+    today = date.today()
+    cases = db.query(LegalCase).options(
+        joinedload(LegalCase.court),
+        joinedload(LegalCase.matter_types),
+        joinedload(LegalCase.assignments).joinedload(CaseLawyer.lawyer),
+    ).all()
+    cases = list({c.case_id: c for c in cases}.values())
+    active = [c for c in cases if c.status != "Disposed"]
+    hearings = db.query(Hearing).all()
+
+    def lead(case):
+        for a in case.assignments:
+            if a.role == "Lead Counsel" and a.end_date is None:
+                return a.lawyer_name
+        return None
+
+    def brief(case, **extra):
+        return {
+            "case_id": case.case_id, "case_number": case.case_number, "matter_title": case.matter_title,
+            "status": case.status, "lead_counsel": lead(case), **extra,
+        }
+
+    scheduled_ahead = {h.case_id for h in hearings if h.status == "Scheduled" and h.hearing_date >= today}
+    last_hearing = {}
+    for h in hearings:
+        if h.status != "Cancelled" and h.hearing_date <= today:
+            last_hearing[h.case_id] = max(last_hearing.get(h.case_id, h.hearing_date), h.hearing_date)
+
+    no_next_date = sorted(
+        (c for c in active if c.case_id not in scheduled_ahead),
+        key=lambda c: last_hearing.get(c.case_id, c.date_filed),
+    )
+    unassigned = [c for c in active if lead(c) is None]
+
+    # How old open matters are
+    buckets = {"Under 6 months": 0, "6 to 12 months": 0, "1 to 2 years": 0, "Over 2 years": 0}
+    for c in active:
+        age = (today - c.date_filed).days
+        key = "Under 6 months" if age < 183 else "6 to 12 months" if age < 365 else "1 to 2 years" if age < 730 else "Over 2 years"
+        buckets[key] += 1
+
+    # How long matters take, and how they end
+    durations, outcomes_by_type = defaultdict(list), defaultdict(Counter)
+    outcomes = Counter()
+    for c in cases:
+        if c.status != "Disposed":
+            continue
+        if c.outcome:
+            outcomes[c.outcome] += 1
+        for m in c.matter_types:
+            if c.disposed_on:
+                durations[m.matter_type].append((c.disposed_on - c.date_filed).days)
+            if c.outcome:
+                outcomes_by_type[m.matter_type][c.outcome] += 1
+
+    # Courts: load and how often listings are adjourned
+    court_rows = {}
+    for c in active:
+        if c.court:
+            court_rows.setdefault(c.court.court_id, {"court_name": c.court.court_name, "active_matters": 0, "hearings": 0, "adjourned": 0})
+            court_rows[c.court.court_id]["active_matters"] += 1
+    court_names = {c.court_id: c.court_name for c in db.query(Court)}
+    for h in hearings:
+        if h.status in ("Held", "Adjourned") and h.court_id:
+            row = court_rows.setdefault(h.court_id, {"court_name": court_names.get(h.court_id), "active_matters": 0, "hearings": 0, "adjourned": 0})
+            row["hearings"] += 1
+            row["adjourned"] += h.status == "Adjourned"
+    for row in court_rows.values():
+        row["adjournment_rate"] = round(row["adjourned"] / row["hearings"] * 100) if row["hearings"] else None
+
+    # Lawyers
+    soon = today + timedelta(days=14)
+    hearings_soon = Counter(h.case_id for h in hearings if h.status == "Scheduled" and today <= h.hearing_date <= soon)
+    logins = {u.lawyer_id: u.user_id for u in db.query(User).filter(User.lawyer_id.isnot(None))}
+    overdue_by_user = Counter(
+        t.assignee_id for t in db.query(Task).filter(Task.status != "Done", Task.due_date < today) if t.assignee_id
+    )
+    lawyer_rows = []
+    for lawyer in db.query(Lawyer).options(joinedload(Lawyer.practice_group)).filter(Lawyer.is_active.is_(True)):
+        current = [a for a in lawyer.assignments if a.end_date is None and a.legal_case]
+        open_rows = [a for a in current if a.legal_case.status != "Disposed"]
+        lawyer_rows.append({
+            "lawyer_id": lawyer.lawyer_id,
+            "lawyer_name": f"{lawyer.fname} {lawyer.lname}",
+            "designation": lawyer.designation,
+            "practice_group": lawyer.practice_group.group_name if lawyer.practice_group else None,
+            "active_matters": len(open_rows),
+            "leading": sum(1 for a in open_rows if a.role == "Lead Counsel"),
+            "hearings_next_14_days": sum(hearings_soon[a.case_id] for a in open_rows),
+            "overdue_tasks": overdue_by_user[logins.get(lawyer.lawyer_id)],
+        })
+    lawyer_rows.sort(key=lambda r: r["active_matters"], reverse=True)
+
+    # Filed against disposed, last 12 months
+    months = []
+    cursor = today.replace(day=1)
+    for _ in range(12):
+        months.append((cursor.year, cursor.month))
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    flow = {m: {"filed": 0, "disposed": 0} for m in months}
+    for c in cases:
+        key = (c.date_filed.year, c.date_filed.month)
+        if key in flow:
+            flow[key]["filed"] += 1
+        if c.disposed_on and (c.disposed_on.year, c.disposed_on.month) in flow:
+            flow[(c.disposed_on.year, c.disposed_on.month)]["disposed"] += 1
+
+    open_tasks = db.query(Task).filter(Task.status != "Done").all()
+    disposed_count = len(cases) - len(active)
+    return {
+        "headline": {
+            "active_matters": len(active),
+            "disposed_matters": disposed_count,
+            "disposal_rate": round(disposed_count / len(cases) * 100, 1) if cases else 0,
+            "hearings_next_7_days": sum(1 for h in hearings if h.status == "Scheduled" and today <= h.hearing_date <= today + timedelta(days=7)),
+            "overdue_deadlines": sum(1 for t in open_tasks if t.kind != "Task" and t.due_date and t.due_date < today),
+            "overdue_tasks": sum(1 for t in open_tasks if t.due_date and t.due_date < today),
+            "unassigned_matters": len(unassigned),
+            "matters_without_next_date": len(no_next_date),
+            "pending_join_requests": db.query(JoinRequest).filter(JoinRequest.status == "Pending").count(),
+        },
+        "no_next_date": [
+            brief(c, last_hearing=last_hearing.get(c.case_id)) for c in no_next_date[:20]
+        ],
+        "unassigned": [brief(c) for c in unassigned[:20]],
+        "age_of_open_matters": [{"bucket": k, "count": v} for k, v in buckets.items()],
+        "time_to_disposal": sorted(
+            ({"matter_type": k, "matters": len(v), "average_days": round(sum(v) / len(v))} for k, v in durations.items()),
+            key=lambda r: r["average_days"], reverse=True,
+        ),
+        "outcomes": [{"outcome": k, "count": v} for k, v in outcomes.most_common()],
+        "outcomes_by_type": [
+            {"matter_type": k, **{o: v.get(o, 0) for o in ("Won", "Lost", "Settled", "Withdrawn", "Dismissed", "Other")}}
+            for k, v in outcomes_by_type.items()
+        ],
+        "courts": sorted(court_rows.values(), key=lambda r: r["active_matters"], reverse=True),
+        "lawyers": lawyer_rows,
+        "flow": [
+            {"label": datetime(y, m, 1).strftime("%b %y"), **flow[(y, m)]} for y, m in reversed(months)
+        ],
     }
