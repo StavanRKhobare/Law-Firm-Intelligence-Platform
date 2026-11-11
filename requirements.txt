@@ -1,0 +1,54 @@
+# FastAPI Backend Requirements — Core (Python 3.14 compatible, updated Sep 2026)
+# Install: pip install -r requirements.txt
+# Heavy AI/ML deps are optional: pip install -r requirements-ml.txt
+
+# Core Framework
+fastapi>=0.119,<0.143
+uvicorn[standard]>=0.34
+python-multipart>=0.0.20
+
+# Database
+sqlalchemy>=2.0.43
+psycopg[binary]>=3.2
+alembic>=1.16
+
+# MongoDB (for evidence storage, optional at runtime)
+pymongo>=4.10
+motor>=3.7
+
+# Authentication & Security (recent standard: PyJWT + bcrypt directly.
+# Replaces unmaintained python-jose and passlib, which break on bcrypt>=4.3/Python 3.14)
+PyJWT>=2.10
+bcrypt>=4.3
+python-dotenv>=1.0.1
+
+# Validation
+pydantic>=2.10
+pydantic-settings>=2.7
+email-validator>=2.2
+
+# File handling
+aiofiles>=24.1
+
+# Date/Time
+python-dateutil>=2.9
+
+# Utilities
+typing-extensions>=4.12
+
+# Testing
+pytest>=8.3
+pytest-asyncio>=0.24
+httpx>=0.27
+
+# Code Quality (optional)
+black>=24.8
+isort>=5.13
+flake8>=7.1
+
+# Development
+ipython>=8.27
+
+# Utilities
+tqdm>=4.66
+requests>=2.32

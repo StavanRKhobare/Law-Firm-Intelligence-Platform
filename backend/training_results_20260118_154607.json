@@ -1,0 +1,26 @@
+{
+  "hotspot_predictor": {
+    "status": "success",
+    "locations_analyzed": 12,
+    "high_risk_locations": 0,
+    "model_path": "models/hotspot/hotspot_models.pkl"
+  },
+  "rf_classifier": {
+    "status": "success",
+    "accuracy": 0.375,
+    "f1_score": 0.4375,
+    "model_path": "models/classifier/crime_classifier_random_forest.pkl"
+  },
+  "xgb_classifier": {
+    "status": "success",
+    "accuracy": 0.75,
+    "f1_score": 0.7083333333333333,
+    "model_path": "models/classifier/crime_classifier_xgboost.pkl"
+  },
+  "forecaster": {
+    "status": "success",
+    "trend": "Stable",
+    "predicted_crimes_30d": 12,
+    "model_path": "models/forecasting/forecast_arima.pkl"
+  }
+}

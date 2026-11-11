@@ -1,0 +1,25 @@
+# Environment files - IMPORTANT!
+*.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+node_modules
+node_modules
+node_modules
+node_modules
+
+*.pkl
+*.joblib
+*.pt
+*.h5

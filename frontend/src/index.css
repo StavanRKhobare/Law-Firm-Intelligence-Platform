@@ -1,0 +1,64 @@
+/* Global base. Colours, type and component styles live in src/theme.js. */
+@import '@fontsource/lato/400.css';
+@import '@fontsource/lato/700.css';
+@import '@fontsource/eb-garamond/500.css';
+@import '@fontsource/eb-garamond/600.css';
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Visible keyboard focus everywhere (mouse clicks don't show it). */
+:focus-visible {
+  outline: 3px solid #1E3A8A;
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 2000;
+  padding: 8px 16px;
+  background: #1E3A8A;
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Visible to screen readers only: names for icon-only table columns. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Printing the cause list: just the content. */
+@media print {
+  header, nav, .MuiDrawer-root, button, .MuiTablePagination-root {
+    display: none !important;
+  }
+  main {
+    width: 100% !important;
+    padding: 0 !important;
+  }
+}
